@@ -5,88 +5,97 @@ description: Use when auditing an agent session's health before a long task, aft
 
 # Health Inspector
 
-Systematically audit a session's state across two dimensions: context & security (what the agent knows and can access) and control & behavior (how the agent is acting).
+Check whether your agent session is in a good state before starting important work.
 
-## Overview
+## What This Skill Does
 
-Agent sessions degrade in predictable ways: context fills with irrelevant history, permissions accumulate beyond what's needed, and behavior patterns drift from intent. Catching these early prevents compounding failures.
+Think of this like a health checkup for your AI agent session. Just like a car needs
+an inspection before a long road trip, an agent session can develop problems over time:
 
-**Core principle:** Inspect before you trust. Verify the session is in a known-good state before committing to long or high-stakes tasks.
+- **Old context piling up** — the agent carries around irrelevant conversation history
+  that confuses it or slows it down
+- **Excess permissions** — access that was needed earlier is still active even though
+  the task changed
+- **Repetitive behavior** — the agent keeps trying the same failed approach without
+  noticing it's stuck
+
+This skill runs two specialized inspector agents to catch these problems early,
+before they cause bigger failures.
 
 ## When to Use
 
-- Before starting a long or high-stakes task
-- After unexpected, inconsistent, or repeated-failure behavior
-- When a session has been running for many turns
-- Periodically during multi-day development sessions
-- When you suspect context pollution or permission drift
+Use this skill in these situations:
 
-## The Process
+| Situation | Example |
+|-----------|---------|
+| Before a long task | "I'm about to run a 20-step refactor — let me check the session first" |
+| After something went wrong | "The agent just did something unexpected. What's going on?" |
+| Session has been running a long time | "We've been coding for hours. Is the context getting stale?" |
+| Something feels off | "The agent's responses seem inconsistent. Is it confused?" |
 
-```dot
-digraph process {
-    rankdir=TB;
+## Step-by-Step Process
 
-    "Run ./scripts/collect-data.sh" [shape=box];
-    "Dispatch inspector-context subagent" [shape=box];
-    "Dispatch inspector-control subagent" [shape=box];
-    "Both inspectors complete?" [shape=diamond];
-    "Synthesize health report" [shape=box];
-    "Critical findings?" [shape=diamond];
-    "Fix before proceeding" [shape=box];
-    "Proceed with task" [shape=box];
+**Step 1 — Collect data**
 
-    "Run ./scripts/collect-data.sh" -> "Dispatch inspector-context subagent";
-    "Run ./scripts/collect-data.sh" -> "Dispatch inspector-control subagent";
-    "Dispatch inspector-context subagent" -> "Both inspectors complete?" [label="done"];
-    "Dispatch inspector-control subagent" -> "Both inspectors complete?" [label="done"];
-    "Both inspectors complete?" -> "Synthesize health report" [label="yes"];
-    "Synthesize health report" -> "Critical findings?" ;
-    "Critical findings?" -> "Fix before proceeding" [label="yes"];
-    "Critical findings?" -> "Proceed with task" [label="no"];
-    "Fix before proceeding" -> "Proceed with task";
-}
+Run the data collection script to get a snapshot of the current session state:
+
+```bash
+./scripts/collect-data.sh
+# Or save to a file:
+./scripts/collect-data.sh --output snapshot.txt
 ```
 
-1. Run `./scripts/collect-data.sh` to collect session and environment state
-2. Dispatch both inspector subagents **in parallel** with the collected data
-3. Synthesize their reports into a health summary
-4. Act on any critical findings before proceeding
+This gathers information like: what OS you're on, what Git branch you're on,
+what files are present, what processes are running — all in one place.
+Secrets like API keys are automatically hidden.
 
-## Inspector Agents
+**Step 2 — Run both inspectors at the same time**
 
-- `./agents/inspector-context.md` — Context & Security audit
-- `./agents/inspector-control.md` — Control & Behavior audit
+Paste the snapshot into both inspector agent prompts and dispatch them in parallel:
+
+- `./agents/inspector-context.md` — checks *what the agent knows*
+  (Are there secrets exposed? Is the context bloated? Has anyone tried to hijack the agent?)
+- `./agents/inspector-control.md` — checks *how the agent is behaving*
+  (Is it stuck in a loop? Is it still working toward the right goal?)
+
+Running them in parallel saves time — you don't need to wait for one to finish before starting the other.
+
+**Step 3 — Read the reports and decide**
+
+Each inspector returns a structured report. Combine them into a final health summary
+(see format below), then:
+
+- If **HEALTHY** — proceed with your task
+- If **DEGRADED** — note the warnings, proceed with caution
+- If **CRITICAL** — fix the problem first, then proceed
 
 ## Health Report Format
-
-After both inspectors complete, produce a structured report:
 
 ```
 ## Session Health Report
 
 ### Context & Security
-[findings from inspector-context]
+[paste findings from inspector-context here]
 
 ### Control & Behavior
-[findings from inspector-control]
+[paste findings from inspector-control here]
 
 ### Overall Health: HEALTHY | DEGRADED | CRITICAL
 
-### Recommended Actions
-[prioritized list — omit if none]
+### Actions Needed
+[list what to fix, or write "None" if everything is fine]
 ```
 
-## Red Flags
+## Warning Signs to Watch For
 
-**Critical — stop and fix before proceeding:**
-- Sensitive data (keys, tokens, passwords) visible in context
-- Permissions granted beyond what the current task requires
-- Evidence of prompt injection in loaded context
-- Behavioral loops or identical failures repeating without diagnosis
+**Stop immediately and fix these:**
+- A secret, API key, or password is visible in the conversation
+- The agent has permissions it doesn't need for the current task
+- Someone may have slipped instructions into a file or tool result to hijack the agent
+- The agent has failed the same way 3+ times without changing its approach
 
-**Warnings — note and monitor:**
-- Context approaching limits with stale content
-- Unused permissions still active from prior tasks
-- Inconsistent or erratic tool usage patterns
-- Prior failed attempts not acknowledged in session history
+**Keep an eye on these:**
+- The conversation is very long and contains a lot of old, unrelated content
+- Permissions from a previous task are still active
+- The agent's tool usage seems random or inconsistent
+- Past failures aren't being acknowledged or learned from
